@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+      font-size: 13px;
+      margin: 0;
+      padding: 0;
+      background: #fafbfc;
+      color: #202124;
+    }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+
+    #header {
+      padding: 12px 14px;
+      border-bottom: 1px solid #e0e0e0;
+      background: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      color: #217346;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #header .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #34a853; display: inline-block;
+    }
+
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .msg-row { display: flex; flex-direction: column; max-width: 92%; }
+    .msg-row.user { align-self: flex-end; align-items: flex-end; }
+    .msg-row.ai { align-self: flex-start; align-items: flex-start; }
+
+    .bubble {
+      padding: 8px 12px;
+      border-radius: 14px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg-row.user .bubble {
+      background: #217346;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-row.ai .bubble {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-bottom-left-radius: 4px;
+    }
+
+    .label {
+      font-size: 10px;
+      color: #9aa0a6;
+      margin: 0 4px 3px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .action-box {
+      margin-top: 6px;
+      background: #f1f8f4;
+      border: 1px solid #34a853;
+      color: #0d652d;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-family: 'Consolas', monospace;
+      font-size: 11.5px;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .action-box:hover { background: #e6f4ea; }
+    .action-box .go {
+      font-family: 'Segoe UI', Roboto, sans-serif;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #34a853;
+      white-space: nowrap;
+    }
+
+    .typing {
+      align-self: flex-start;
+      color: #9aa0a6;
+      font-size: 12px;
+      padding: 4px 12px;
+      font-style: italic;
+    }
+
+    #inputBar {
+      border-top: 1px solid #e0e0e0;
+      background: #fff;
+      padding: 10px;
+    }
+    #hint {
+      font-size: 10.5px;
+      color: #9aa0a6;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+    #inputRow { display: flex; gap: 6px; align-items: flex-end; }
+    textarea {
+      flex: 1;
+      resize: none;
+      border: 1px solid #dadce0;
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      height: 40px;
+      max-height: 100px;
+      outline: none;
+    }
+    textarea:focus { border-color: #217346; }
+    #sendBtn {
+      background: #217346;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      font-size: 16px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #sendBtn:disabled { background: #dadce0; cursor: default; }
+    #sendBtn:hover:not(:disabled) { background: #1b5e38; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="header"><span class="dot"></span> AI Assistant</div>
+    <div id="chat"></div>
+    <div id="inputBar">
+      <div id="hint">Just describe what you want — the AI finds the right cells automatically.</div>
+      <div id="inputRow">
+        <textarea id="input" placeholder="e.g. add Germany as the buyer, discount 100"></textarea>
+        <button id="sendBtn">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ====== CONFIG — same values as your Sheets version ======
+    var BRAIN_URL = 'https://script.google.com/macros/s/AKfycby21lmsIeHepn3_GJx96_OifJIvN7G7VXJBc27Y0HOkbBMe2T7s7WB2SrEpYmutubY/exec';
+    var CLIENT_TOKEN = 'saas2026';
+
+    var conversationHistory = [];
+
+    Office.onReady(function () {
+      document.getElementById('sendBtn').addEventListener('click', sendMessage);
+      document.getElementById('input').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+    });
+
+    // ---------- Office.js helpers (replace SpreadsheetApp calls) ----------
+
+    function colToLetter(col) {
+      var letter = '';
+      while (col > 0) {
+        var rem = (col - 1) % 26;
+        letter = String.fromCharCode(65 + rem) + letter;
+        col = Math.floor((col - rem - 1) / 26);
+      }
+      return letter;
+    }
+
+    async function getSheetContext() {
+      return Excel.run(async (context) => {
+        var sheets = context.workbook.worksheets;
+        sheets.load('items/name');
+        var activeSheet = context.workbook.worksheets.getActiveWorksheet();
+        activeSheet.load('name');
+        await context.sync();
+
+        var loaded = sheets.items.map(function (sheet) {
+          var ur = sheet.getUsedRangeOrNullObject();
+          ur.load('values, rowIndex, columnIndex, isNullObject');
+          return { sheet: sheet, ur: ur };
+        });
+        await context.sync();
+
+        var lines = [];
+        loaded.forEach(function (item) {
+          if (item.ur.isNullObject) return;
+          var values = item.ur.values;
+          for (var r = 0; r < values.length; r++) {
+            for (var c = 0; c < values[r].length; c++) {
+              var val = values[r][c];
+              if (val !== '' && val !== null) {
+                var colLetter = colToLetter(item.ur.columnIndex + c + 1);
+                var rowNum = item.ur.rowIndex + r + 1;
+                lines.push("'" + item.sheet.name + "'!" + colLetter + rowNum + ': ' + val);
+              }
+            }
+          }
+        });
+
+        return { activeSheetName: activeSheet.name, labeledCells: lines.join('\n') };
+      });
+    }
+
+    async function insertWrites(writesJson) {
+      var writes;
+      try {
+        writes = JSON.parse(writesJson);
+      } catch (e) {
+        var repaired = writesJson
+          .replace(/,(\s*[\]}])/g, '$1')
+          .replace(/:\s*TRUE\b/gi, ':true')
+          .replace(/:\s*FALSE\b/gi, ':false');
+        writes = JSON.parse(repaired);
+      }
+
+      return Excel.run(async (context) => {
+        var activeSheet = context.workbook.worksheets.getActiveWorksheet();
+        writes.forEach(function (w) {
+          var sheet = activeSheet;
+          var cellRef = w.cell;
+          if (cellRef.indexOf('!') > -1) {
+            var parts = cellRef.split('!');
+            var sheetName = parts[0].replace(/^'|'$/g, '');
+            cellRef = parts[1];
+            sheet = context.workbook.worksheets.getItem(sheetName); // sheet must already exist
+          }
+          var range = sheet.getRange(cellRef);
+          var val = w.value;
+          if (typeof val === 'string' && val.trim().charAt(0) === '=') {
+            range.formulas = [[val.trim()]];
+          } else {
+            range.values = [[val]];
+          }
+        });
+        await context.sync();
+        return 'Updated ' + writes.length + ' cell(s): ' + writes.map(function (w) { return w.cell; }).join(', ');
+      });
+    }
+
+    async function insertFormula(formula) {
+      return Excel.run(async (context) => {
+        var cell = context.workbook.getActiveCell();
+        cell.formulas = [[formula]];
+        await context.sync();
+        return 'Inserted formula into active cell';
+      });
+    }
+
+    async function insertTable(tableJson) {
+      var data;
+      try {
+        data = JSON.parse(tableJson);
+      } catch (e) {
+        var repaired = tableJson.replace(/,(\s*[\]}])/g, '$1');
+        data = JSON.parse(repaired);
+      }
+
+      return Excel.run(async (context) => {
+        var activeCell = context.workbook.getActiveCell();
+        activeCell.load('rowIndex, columnIndex');
+        await context.sync();
+
+        var numRows = data.length;
+        var numCols = Math.max.apply(null, data.map(function (row) { return row.length; }));
+        var padded = data.map(function (row) {
+          var newRow = row.slice();
+          while (newRow.length < numCols) newRow.push('');
+          return newRow;
+        });
+
+        var sheet = context.workbook.worksheets.getActiveWorksheet();
+        var range = sheet.getRangeByIndexes(activeCell.rowIndex, activeCell.columnIndex, numRows, numCols);
+        range.values = padded;
+        await context.sync();
+        return 'Inserted ' + numRows + ' rows x ' + numCols + ' cols';
+      });
+    }
+
+    // No MailApp equivalent in Excel add-ins without Graph auth — opens a
+    // pre-filled draft in the user's default mail app instead (user clicks Send).
+    function sendEmailAction(sendJson) {
+      var send = {};
+      try { send = JSON.parse(sendJson); } catch (e) {}
+      if (!send.to) return 'Error: no recipient email provided.';
+      var mailto = 'mailto:' + encodeURIComponent(send.to) +
+        '?subject=' + encodeURIComponent(send.subject || 'Message from AI Assistant') +
+        '&body=' + encodeURIComponent(send.body || '');
+      window.open(mailto, '_blank');
+      return 'Opened a draft email to ' + send.to + ' — review and hit send in your mail app.';
+    }
+
+    function getUserEmail() {
+      var email = localStorage.getItem('ai_assistant_email');
+      if (!email) {
+        email = window.prompt('Enter your email to activate the assistant (must be on the approved list):');
+        if (email) localStorage.setItem('ai_assistant_email', email);
+      }
+      return email || '';
+    }
+
+    // ---------- Talk to the same Brain.gs backend directly ----------
+
+    async function askAgent(userMessage, historyJson) {
+      var context = await getSheetContext();
+      var payload = {
+        authToken: CLIENT_TOKEN,
+        userKey: getUserEmail() || 'anonymous',
+        userEmail: getUserEmail(),
+        userMessage: userMessage,
+        historyJson: historyJson,
+        context: context
+      };
+
+      // text/plain avoids a CORS preflight; Brain.gs already does
+      // JSON.parse(e.postData.contents) so it doesn't care about the header.
+      var resp = await fetch(BRAIN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      var data = await resp.json();
+      if (data.result) return data.result;
+      return 'Error: ' + (data.error || 'Unknown error contacting assistant.');
+    }
+
+    // ---------- Chat UI plumbing (same behavior as the Sheets sidebar) ----------
+
+    async function sendMessage() {
+      var input = document.getElementById('input');
+      var msg = input.value.trim();
+      if (!msg) return;
+
+      addMessage('user', msg);
+      conversationHistory.push({ role: 'user', content: msg });
+      input.value = '';
+      document.getElementById('sendBtn').disabled = true;
+      showTyping();
+
+      try {
+        var response = await askAgent(msg, JSON.stringify(conversationHistory.slice(0, -1)));
+        removeTyping();
+        addMessage('ai', response);
+        conversationHistory.push({ role: 'assistant', content: response });
+        if (conversationHistory.length > 10) conversationHistory = conversationHistory.slice(-10);
+      } catch (err) {
+        removeTyping();
+        addMessage('ai', 'Error: ' + err.message);
+      }
+      document.getElementById('sendBtn').disabled = false;
+    }
+
+    function showTyping() {
+      var chat = document.getElementById('chat');
+      var div = document.createElement('div');
+      div.className = 'typing';
+      div.id = 'typingIndicator';
+      div.textContent = 'thinking…';
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+    function removeTyping() {
+      var el = document.getElementById('typingIndicator');
+      if (el) el.remove();
+    }
+
+    function addMessage(role, text) {
+      if (role === 'ai') {
+        text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+        text = text.replace(/\*\*(WRITES|TABLE|FORMULA):\*\*/g, '$1:');
+      }
+
+      var chat = document.getElementById('chat');
+      var row = document.createElement('div');
+      row.className = 'msg-row ' + role;
+
+      var label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = role === 'user' ? 'You' : 'Assistant';
+      row.appendChild(label);
+
+      var bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      var formulaRegex = /FORMULA:\s*(=[^\n]+)/g;
+      var tableMatch = text.match(/TABLE:\s*(\[[\s\S]+?\])\s*$/m);
+      var writesMatch = text.match(/WRITES:\s*(\[[\s\S]+?\])\s*$/m);
+      var sendMatch = text.match(/SEND:\s*(\{[\s\S]+?\})\s*$/m);
+      var formulaMatches = [];
+      var m;
+      while ((m = formulaRegex.exec(text)) !== null) formulaMatches.push(m[1].trim());
+
+      if (role === 'ai' && sendMatch) {
+        var sendJson = sendMatch[1].trim();
+        bubble.textContent = text.replace(sendMatch[0], '').trim();
+        row.appendChild(bubble);
+
+        var sendObj = {};
+        try { sendObj = JSON.parse(sendJson); } catch (e) {}
+        var sbox = document.createElement('div');
+        sbox.className = 'action-box';
+        sbox.innerHTML = '<span>Email draft ready for ' + escapeText(sendObj.to || '?') + '</span><span class="go">SEND →</span>';
+        sbox.addEventListener('click', function () {
+          var msg = sendEmailAction(sendJson);
+          addMessage('ai', msg);
+        });
+        row.appendChild(sbox);
+
+      } else if (role === 'ai' && writesMatch) {
+        var writesJson = writesMatch[1].trim();
+        bubble.textContent = text.replace(writesMatch[0], '').trim();
+        row.appendChild(bubble);
+
+        var count = 0;
+        try { count = JSON.parse(writesJson).length; } catch (e) {}
+        var box = document.createElement('div');
+        box.className = 'action-box';
+        box.innerHTML = '<span>' + count + ' cell update(s) ready</span><span class="go">APPLY →</span>';
+        box.addEventListener('click', async function () {
+          try {
+            var msg = await insertWrites(writesJson);
+            addMessage('ai', msg);
+          } catch (err) {
+            addMessage('ai', 'Error applying writes: ' + err.message);
+          }
+        });
+        row.appendChild(box);
+
+      } else if (role === 'ai' && formulaMatches.length > 0) {
+        bubble.textContent = text.replace(/FORMULA:\s*=[^\n]+/g, '').trim();
+        row.appendChild(bubble);
+
+        formulaMatches.forEach(function (f) {
+          var box2 = document.createElement('div');
+          box2.className = 'action-box';
+          box2.innerHTML = '<span>' + escapeText(f) + '</span><span class="go">INSERT →</span>';
+          box2.addEventListener('click', async function () {
+            try {
+              var msg = await insertFormula(f);
+              addMessage('ai', msg);
+            } catch (err) {
+              addMessage('ai', 'Error inserting formula: ' + err.message);
+            }
+          });
+          row.appendChild(box2);
+        });
+
+      } else if (role === 'ai' && tableMatch) {
+        var tableJson = tableMatch[1].trim();
+        bubble.textContent = text.replace(tableMatch[0], '').trim();
+        row.appendChild(bubble);
+
+        var rowCount = 0;
+        try { rowCount = JSON.parse(tableJson).length; } catch (e) {}
+        var tbox = document.createElement('div');
+        tbox.className = 'action-box';
+        tbox.innerHTML = '<span>Table layout (' + rowCount + ' rows)</span><span class="go">INSERT →</span>';
+        tbox.addEventListener('click', async function () {
+          try {
+            var msg = await insertTable(tableJson);
+            addMessage('ai', msg);
+          } catch (err) {
+            addMessage('ai', 'Error inserting table: ' + err.message);
+          }
+        });
+        row.appendChild(tbox);
+
+      } else {
+        bubble.textContent = text;
+        row.appendChild(bubble);
+      }
+
+      chat.appendChild(row);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function escapeText(t) {
+      var d = document.createElement('div');
+      d.textContent = t;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>
