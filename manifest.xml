@@ -11,8 +11,8 @@
   <Version>1.0.0.0</Version>
   <ProviderName>Your Name</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="AI Assistant"/>
-  <Description DefaultValue="AI assistant for Excel, ported from the Google Sheets version."/>
+  <DisplayName DefaultValue="Gerled"/>
+  <Description DefaultValue="Gerled — an AI assistant for Excel that can read, write, and navigate across every tab in your workbook."/>
 
   <!-- If you don't actually have these icons hosted, it may show a default missing icon in Excel, but the add-in will still function -->
   <IconUrl DefaultValue="https://eleprim.github.io/excel-ai-assistant/assets/icon-32.png"/>
@@ -82,13 +82,13 @@
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://eleprim.github.io/excel-ai-assistant/"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="Get started with AI Assistant!"/>
-        <bt:String id="CommandsGroup.Label" DefaultValue="AI Assistant"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="AI Assistant"/>
+        <bt:String id="GetStarted.Title" DefaultValue="Get started with Gerled!"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="Gerled"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Gerled"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="Open the AI Assistant task pane."/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open AI Assistant"/>
+        <bt:String id="GetStarted.Description" DefaultValue="Open the Gerled task pane."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open Gerled"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
